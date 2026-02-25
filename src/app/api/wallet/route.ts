@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { WalletData, WalletToken, WalletTransaction } from "@/types";
 
 const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
-const JUPITER_PRICE_API = "https://api.jup.ag/price/v2";
-const SOL_MINT = "So11111111111111111111111111111111111111112";
+const DEXSCREENER_BASE = "https://api.dexscreener.com";
 
 async function rpc(method: string, params: unknown[]) {
   const res = await fetch(SOLANA_RPC, {
@@ -16,6 +15,21 @@ async function rpc(method: string, params: unknown[]) {
   return json.result;
 }
 
+async function getSolPrice(): Promise<number> {
+  try {
+    const res = await fetch(`${DEXSCREENER_BASE}/latest/dex/search?q=SOL%2FUSDC`);
+    if (!res.ok) return 0;
+    const data = await res.json();
+    const solPair = (data.pairs || []).find(
+      (p: { chainId: string; baseToken?: { symbol: string }; quoteToken?: { symbol: string } }) =>
+        p.chainId === "solana" && p.baseToken?.symbol === "SOL" && p.quoteToken?.symbol === "USDC"
+    );
+    return solPair ? parseFloat(solPair.priceUsd) : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const address = searchParams.get("address");
@@ -24,14 +38,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing address parameter" }, { status: 400 });
   }
 
-  // Basic Solana address validation
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
     return NextResponse.json({ error: "Invalid Solana address format" }, { status: 400 });
   }
 
   try {
-    // Fetch SOL balance and token accounts in parallel
-    const [balanceResult, tokenResult, signaturesResult, solPriceResult] = await Promise.allSettled([
+    const [balanceResult, tokenResult, signaturesResult, solPrice] = await Promise.allSettled([
       rpc("getBalance", [address]),
       rpc("getTokenAccountsByOwner", [
         address,
@@ -39,68 +51,44 @@ export async function GET(req: NextRequest) {
         { encoding: "jsonParsed" },
       ]),
       rpc("getSignaturesForAddress", [address, { limit: 10 }]),
-      fetch(`${JUPITER_PRICE_API}?ids=${SOL_MINT}`).then(r => r.json()),
+      getSolPrice(),
     ]);
 
-    // SOL balance
     const solLamports = balanceResult.status === "fulfilled" ? (balanceResult.value?.value ?? 0) : 0;
     const solBalance = solLamports / 1e9;
-    const solPrice = solPriceResult.status === "fulfilled"
-      ? parseFloat(solPriceResult.value?.data?.[SOL_MINT]?.price ?? "0")
-      : 0;
-    const solUsdValue = solBalance * solPrice;
+    const solUsdPrice = solPrice.status === "fulfilled" ? solPrice.value : 0;
+    const solUsdValue = solBalance * solUsdPrice;
 
-    // Token accounts
     let tokens: WalletToken[] = [];
     if (tokenResult.status === "fulfilled" && tokenResult.value?.value) {
-      const mints: string[] = [];
-      const rawTokens = tokenResult.value.value.map((acct: { account: { data: { parsed: { info: { mint: string; tokenAmount: { uiAmount: number; decimals: number } } } } } }) => {
-        const info = acct.account.data.parsed.info;
-        mints.push(info.mint);
-        return {
-          mint: info.mint,
-          symbol: info.mint.slice(0, 4).toUpperCase(),
-          name: "Unknown",
-          amount: info.tokenAmount.uiAmount,
-          decimals: info.tokenAmount.decimals,
-          usdValue: null,
-        };
-      }).filter((t: WalletToken) => t.amount > 0);
-
-      // Try to get prices for tokens
-      if (mints.length > 0) {
-        try {
-          const priceRes = await fetch(`${JUPITER_PRICE_API}?ids=${mints.slice(0, 20).join(",")}`);
-          if (priceRes.ok) {
-            const priceData = await priceRes.json();
-            tokens = rawTokens.map((t: WalletToken) => ({
-              ...t,
-              usdValue: priceData.data?.[t.mint]?.price
-                ? t.amount * parseFloat(priceData.data[t.mint].price)
-                : null,
-            }));
-          } else {
-            tokens = rawTokens;
-          }
-        } catch {
-          tokens = rawTokens;
-        }
-      }
-
-      // Sort by USD value
-      tokens.sort((a, b) => (b.usdValue ?? 0) - (a.usdValue ?? 0));
-      tokens = tokens.slice(0, 20);
+      tokens = (tokenResult.value.value as Array<{
+        account: { data: { parsed: { info: { mint: string; tokenAmount: { uiAmount: number; decimals: number } } } } };
+      }>)
+        .map((acct) => {
+          const info = acct.account.data.parsed.info;
+          return {
+            mint: info.mint,
+            symbol: info.mint.slice(0, 6).toUpperCase(),
+            name: "SPL Token",
+            amount: info.tokenAmount.uiAmount,
+            decimals: info.tokenAmount.decimals,
+            usdValue: null,
+          };
+        })
+        .filter((t: WalletToken) => t.amount > 0)
+        .slice(0, 20);
     }
 
-    // Transactions
     let transactions: WalletTransaction[] = [];
     if (signaturesResult.status === "fulfilled" && Array.isArray(signaturesResult.value)) {
-      transactions = signaturesResult.value.slice(0, 10).map((sig: { signature: string; blockTime?: number }) => ({
-        signature: sig.signature,
-        type: "OTHER" as const,
-        timestamp: (sig.blockTime ?? 0) * 1000,
-        description: shortenSig(sig.signature),
-      }));
+      transactions = (signaturesResult.value as Array<{ signature: string; blockTime?: number }>)
+        .slice(0, 10)
+        .map((sig) => ({
+          signature: sig.signature,
+          type: "OTHER" as const,
+          timestamp: (sig.blockTime ?? 0) * 1000,
+          description: sig.signature.slice(0, 8) + "…" + sig.signature.slice(-6),
+        }));
     }
 
     const data: WalletData = { address, solBalance, solUsdValue, tokens, transactions };
@@ -111,8 +99,4 @@ export async function GET(req: NextRequest) {
       { status: 200 }
     );
   }
-}
-
-function shortenSig(sig: string): string {
-  return sig.slice(0, 8) + "…" + sig.slice(-6);
 }
