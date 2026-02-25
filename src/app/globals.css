@@ -1,26 +1,119 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: oklch(0.08 0.01 280);
+  --surface: oklch(0.11 0.015 280);
+  --surface-raised: oklch(0.14 0.02 280);
+  --border: oklch(0.20 0.02 280);
+  --border-subtle: oklch(0.14 0.015 280);
+  --accent-primary: oklch(0.70 0.25 280);
+  --accent-primary-dim: oklch(0.70 0.25 280 / 0.15);
+  --accent-green: oklch(0.72 0.22 145);
+  --accent-green-dim: oklch(0.72 0.22 145 / 0.12);
+  --accent-red: oklch(0.60 0.22 25);
+  --accent-red-dim: oklch(0.60 0.22 25 / 0.12);
+  --accent-amber: oklch(0.78 0.18 85);
+  --text-primary: oklch(0.95 0.01 280);
+  --text-secondary: oklch(0.65 0.03 280);
+  --text-muted: oklch(0.42 0.02 280);
+  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background-color: var(--background);
+  color: var(--text-primary);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--background);
+  color: var(--text-primary);
+  font-family: var(--font-inter), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Tailwind layer utilities */
+@layer utilities {
+  .font-mono-num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .text-gain {
+    color: var(--accent-green);
+  }
+  .text-loss {
+    color: var(--accent-red);
+  }
+  .text-neutral {
+    color: var(--text-muted);
+  }
+
+  .bg-surface {
+    background-color: var(--surface);
+  }
+  .bg-surface-raised {
+    background-color: var(--surface-raised);
+  }
+  .border-subtle {
+    border-color: var(--border);
+  }
+
+  .label-upper {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .card-base {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .card-hover {
+    transition: border-color 150ms, box-shadow 150ms;
+  }
+  .card-hover:hover {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px oklch(0.70 0.25 280 / 0.3);
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* Ticker animation */
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.animate-ticker {
+  animation: ticker-scroll 40s linear infinite;
+}
+.animate-ticker:hover {
+  animation-play-state: paused;
+}
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-raised) 50%, var(--surface) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
 }
